@@ -1,0 +1,85 @@
+service: chatroom
+provider:
+  name: aws
+  runtime: nodejs8.10
+  stackName: ${self:service}-${self:provider.stage}
+  stage: ${opt:stage, 'dev'}
+  region: ${opt:region, 'us-west-2'}
+  memorySize: 128
+  iamRoleStatements:
+    - Effect: Allow
+      Action:
+        - "execute-api:ManageConnections"
+      Resource:
+        - "arn:aws:execute-api:*:*:**/@connections/*"
+    - Effect: Allow
+      Action:
+        - "dynamodb:PutItem"
+        - "dynamodb:GetItem"
+        - "dynamodb:UpdateItem"
+        - "dynamodb:DeleteItem"
+        - "dynamodb:Query"
+        - "dynamodb:Scan"
+      Resource:
+        - Fn::GetAtt: [ChatConnectionsTable, Arn]
+        - Fn::Join:
+            - "/"
+            - - Fn::GetAtt: [ChatConnectionsTable, Arn]
+              - "*"
+  environment:
+    CHATCONNECTION_TABLE:
+      Ref: ChatConnectionsTable
+
+  websocketApiName: websocket-chat-${self:provider.stage}
+  websocketApiRouteSelectionExpression: $request.body.action
+
+functions:
+  connectionManager:
+    handler: handler.connectionManager
+    events:
+      - websocket:
+          route: $connect
+      - websocket:
+          route: $disconnect
+  defaultMessages:
+    handler: handler.defaultMessage
+    events:
+      - websocket:
+          route: $default
+  sendMessage:
+    handler: handler.sendMessage
+    events:
+      - websocket:
+          route: sendMessage
+resources:
+  Resources:
+    ChatConnectionsTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: chatUsers
+        AttributeDefinitions:
+          - AttributeName: connectionId
+            AttributeType: S
+        KeySchema:
+          - AttributeName: connectionId
+            KeyType: HASH
+        BillingMode: PAY_PER_REQUEST
+  Outputs:
+    ChatConnectionsTableArn:
+      Value:
+        Fn::GetAtt:
+          - ChatConnectionsTable
+          - Arn
+      Export:
+        Name: ${self:service}:ChatConnectionsTableArn
+    EndpointWebsocket:
+      Value:
+        Fn::Join:
+          - ""
+          - - "wss://"
+            - Ref: WebsocketsApi
+            - ".execute-api.us-west-2."
+            - Ref: AWS::URLSuffix
+            - "/dev"
+      Export:
+        Name: WSConnection
